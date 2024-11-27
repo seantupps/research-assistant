@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Research Assistant</title>
+    <!-- Include Bootstrap CSS -->
+    <link
+      rel="stylesheet"
+      href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
+    />
+    <style>
+        body {
+            margin-top: 20px;
+        }
+        .paper {
+            margin-bottom: 30px;
+        }
+        .summary {
+            background-color: #f8f9fa;
+            padding: 15px;
+            margin-top: 10px;
+            border-radius: 5px;
+        }
+        .loading {
+            font-style: italic;
+            color: gray;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center">Research Assistant</h1>
+        <div id="search-container" class="my-4">
+            <div class="input-group">
+                <input
+                  type="text"
+                  id="query"
+                  class="form-control"
+                  placeholder="Enter research topic"
+                />
+                <div class="input-group-append">
+                    <button class="btn btn-primary" onclick="searchPapers()">Search</button>
+                </div>
+            </div>
+        </div>
+        <div id="results"></div>
+    </div>
+
+    <!-- Include Bootstrap JS and dependencies -->
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <!-- Include Marked.js for Markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        let query = '';
+        let start = 0;
+        const maxResults = 10;
+        let totalResults = 0;
+        let loadingMore = false;
+        let paperIndex = 0; // Global counter for unique paper IDs
+
+        async function searchPapers() {
+            query = document.getElementById("query").value.trim();
+            if (!query) {
+                alert('Please enter a research topic.');
+                return;
+            }
+            start = 0;
+            totalResults = 0;
+            paperIndex = 0; // Reset paperIndex on new search
+            document.getElementById("results").innerHTML = "<p class='loading'>Loading...</p>";
+            try {
+                const response = await fetch('/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, start, max_results: maxResults })
+                });
+                const data = await response.json();
+                totalResults = data.total_results;
+                document.getElementById("results").innerHTML = `<p>Found ${totalResults} papers for "${query}".</p>`;
+                displayPapers(data.papers);
+                start += maxResults;
+                if (start < totalResults) {
+                    window.addEventListener('scroll', handleScroll);
+                }
+            } catch (error) {
+                console.error(error);
+                alert('An error occurred while fetching papers.');
+            }
+        }
+
+        function handleScroll() {
+            if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 500 && !loadingMore) {
+                loadingMore = true;
+                loadMorePapers();
+            }
+        }
+
+        async function loadMorePapers() {
+            if (start >= totalResults) {
+                window.removeEventListener('scroll', handleScroll);
+                return;
+            }
+            const resultsDiv = document.getElementById("results");
+            const loadingDiv = document.createElement('p');
+            loadingDiv.className = 'loading';
+            loadingDiv.innerText = 'Loading more papers...';
+            resultsDiv.appendChild(loadingDiv);
+            try {
+                const response = await fetch('/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, start, max_results: maxResults })
+                });
+                const data = await response.json();
+                displayPapers(data.papers);
+                start += maxResults;
+                if (start >= totalResults) {
+                    window.removeEventListener('scroll', handleScroll);
+                }
+            } catch (error) {
+                console.error(error);
+                alert('An error occurred while fetching more papers.');
+            }
+            loadingDiv.remove();
+            loadingMore = false;
+        }
+
+        function displayPapers(papers) {
+            const resultsDiv = document.getElementById("results");
+            if (papers.length === 0) {
+                if (start === 0) {
+                    resultsDiv.innerHTML = "<p>No papers found.</p>";
+                }
+                return;
+            }
+            papers.forEach((paper) => {
+                const index = paperIndex++;  // Increment paperIndex for each paper displayed
+                const paperDiv = document.createElement("div");
+                paperDiv.className = 'paper';
+
+                const card = document.createElement("div");
+                card.className = 'card';
+
+                const cardBody = document.createElement("div");
+                cardBody.className = 'card-body';
+
+                const title = document.createElement('h5');
+                title.className = 'card-title';
+                title.textContent = paper.title;
+
+                const authors = document.createElement('p');
+                authors.className = 'card-text';
+                authors.innerHTML = `<strong>Authors:</strong> ${paper.authors.join(", ")}`;
+
+                const date = document.createElement('p');
+                date.className = 'card-text';
+                date.innerHTML = `<strong>Date:</strong> ${paper.date}`;  // Display full date
+
+                const link = document.createElement('p');
+                link.className = 'card-text';
+                link.innerHTML = `<strong>Link:</strong> <a href="${paper.link}" target="_blank">${paper.link}</a>`;
+
+                const button = document.createElement('button');
+                button.textContent = 'Summarize';
+                button.className = 'btn btn-secondary';
+                button.addEventListener('click', () => {
+                    const pdfUrl = paper.link.replace(/https?:\/\/arxiv\.org\/abs\//, 'https://arxiv.org/pdf/') + '.pdf';
+                    summarizePaper(pdfUrl, index, button);
+                });
+
+                const summaryDiv = document.createElement('div');
+                summaryDiv.id = `summary-${index}`;
+                summaryDiv.className = 'summary';
+
+                cardBody.appendChild(title);
+                cardBody.appendChild(authors);
+                cardBody.appendChild(date);
+                cardBody.appendChild(link);
+                cardBody.appendChild(button);
+                cardBody.appendChild(summaryDiv);
+
+                card.appendChild(cardBody);
+                paperDiv.appendChild(card);
+                resultsDiv.appendChild(paperDiv);
+            });
+        }
+
+        async function summarizePaper(pdf_url, index, button) {
+            const summaryDiv = document.getElementById(`summary-${index}`);
+            summaryDiv.innerHTML = "<p class='loading'>Summarizing...</p>";
+            button.disabled = true;
+            try {
+                const response = await fetch('/summarize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pdf_url: pdf_url })
+                });
+                const data = await response.json();
+                if (data.error) {
+                    summaryDiv.innerHTML = `<p>Error: ${data.error}</p>`;
+                } else {
+                    summaryDiv.innerHTML = marked.parse(data.summary);
+                }
+            } catch (error) {
+                console.error(error);
+                summaryDiv.innerHTML = "<p>An error occurred while summarizing.</p>";
+            }
+            button.disabled = false;
+        }
+    </script>
+</body>
+</html>
